@@ -1,10 +1,17 @@
+mod lidar;
 mod motor_control;
-use std::{thread, time::Duration};
+use std::{
+    io, thread,
+    time::{Duration, Instant},
+};
 
+use lidar::LidarRequest;
 use motor_control::{MotorControlRequest, MotorControlResponse};
 
+use crate::lidar::LidarResponse;
+
 fn main() {
-    let mut port = serialport::new("/dev/ttyACM0", 115200)
+    let mut arduino_port = serialport::new("/dev/ttyACM0", 115200)
         .timeout(Duration::from_micros(1000))
         .open()
         .unwrap_or_else(|err| {
@@ -16,22 +23,54 @@ fn main() {
             }
             std::process::exit(1);
         });
-    thread::sleep(Duration::from_millis(1500));
+    let mut lidar_port = serialport::new("/dev/ttyAMA0", 115200)
+        .timeout(Duration::from_micros(1000))
+        .open()
+        .unwrap_or_else(|err| {
+            eprintln!("Failed to open serial port: {}", err);
+            println!("Here are the available ports:");
+            let ports = serialport::available_ports().expect("No ports found!");
+            for p in ports {
+                println!("{}", p.port_name);
+            }
+            std::process::exit(1);
+        });
+    // thread::sleep(Duration::from_millis(1500));
+
+    // loop {
+    //     // get an input u16 from the user
+    //     let mut input = String::new();
+    //     println!("Enter a position for the servo motor (500-2500): ");
+    //     std::io::stdin().read_line(&mut input).unwrap();
+    //     let position: u16 = input.trim().parse().unwrap();
+    //     if position < 1070 || position > 1820 {
+    //         println!("Invalid input. Please enter a number between 1070 and 1820.");
+    //         continue;
+    //     }
+    //     MotorControlRequest::SetServoPosition {
+    //         microseconds: position,
+    //     }
+    //     .write(&mut arduino_port)
+    //     .unwrap();
+    // }
+
+    let mut time = Instant::now();
     loop {
-        // get an input u16 from the user
-        let mut input = String::new();
-        println!("Enter a position for the servo motor (500-2500): ");
-        std::io::stdin().read_line(&mut input).unwrap();
-        let position: u16 = input.trim().parse().unwrap();
-        if position < 1070 || position > 1820 {
-            println!("Invalid input. Please enter a number between 1070 and 1820.");
-            continue;
+        let request = LidarRequest::GetDeviceInfo;
+        request.write(&mut lidar_port).unwrap();
+        loop {
+            if lidar_port.bytes_to_read().unwrap() >= 27 {
+                let response = LidarResponse::read(&mut lidar_port).unwrap();
+                println!(
+                    "Lidar device info {:?} received in {:?}",
+                    response,
+                    time.elapsed()
+                );
+                time = Instant::now();
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
         }
-        MotorControlRequest::SetServoPosition {
-            microseconds: position,
-        }
-        .write(&mut port)
-        .unwrap();
     }
 }
 
