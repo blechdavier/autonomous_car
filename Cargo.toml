@@ -1,0 +1,10 @@
+[package]
+name = "autonomous_car"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+icp_2d = "0.1.2"
+serialport = "4.3.0"
