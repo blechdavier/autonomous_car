@@ -4,7 +4,8 @@ use std::{thread, time::Duration};
 use motor_control::{MotorControlRequest, MotorControlResponse};
 
 fn main() {
-    let mut port = serialport::new("/dev/tty.usbmodem1201", 115200)
+    let mut port = serialport::new("/dev/ttyACM0", 115200)
+        .timeout(Duration::from_micros(1000))
         .open()
         .unwrap_or_else(|err| {
             eprintln!("Failed to open serial port: {}", err);
@@ -15,23 +16,23 @@ fn main() {
             }
             std::process::exit(1);
         });
-    thread::sleep(Duration::from_millis(500));
-    // set_position_and_wait(&mut port, 1000);
-    // set_servo_position_and_wait(&mut port, 1200);
-    // set_position_and_wait(&mut port, 500);
-    // set_position_and_wait(&mut port, 1000);
-    // set_servo_position_and_wait(&mut port, 1800);
-    // set_position_and_wait(&mut port, 1500);
-    // set_position_and_wait(&mut port, 1000);
-    // set_servo_position_and_wait(&mut port, 1500);
-    set_servo_position_and_wait(&mut port, 1430);
-    set_servo_position_and_wait(&mut port, 1630);
-    set_position_and_wait(&mut port, 5000);
-    set_position_and_wait(&mut port, -400);
-
-    set_servo_position_and_wait(&mut port, 1230);
-    set_position_and_wait(&mut port, 5000);
-    set_position_and_wait(&mut port, -400);
+    thread::sleep(Duration::from_millis(1500));
+    loop {
+        // get an input u16 from the user
+        let mut input = String::new();
+        println!("Enter a position for the servo motor (500-2500): ");
+        std::io::stdin().read_line(&mut input).unwrap();
+        let position: u16 = input.trim().parse().unwrap();
+        if position < 1070 || position > 1820 {
+            println!("Invalid input. Please enter a number between 1070 and 1820.");
+            continue;
+        }
+        MotorControlRequest::SetServoPosition {
+            microseconds: position,
+        }
+        .write(&mut port)
+        .unwrap();
+    }
 }
 
 fn set_position_and_wait(port: &mut Box<dyn serialport::SerialPort>, position: i32) {
