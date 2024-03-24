@@ -40,7 +40,6 @@ impl MotorControlRequest {
             MotorControlRequest::SetMotorPosition { clicks } => {
                 port.write(&[0x01])?;
                 let bytes = clicks.to_le_bytes();
-                dbg!(bytes);
                 port.write(&bytes)?;
             }
             MotorControlRequest::SetServoPosition { microseconds } => {
