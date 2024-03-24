@@ -1,7 +1,9 @@
 mod lidar;
 mod motor_control;
 use std::{
-    io, thread,
+    io::{Read, Write},
+    net::{TcpListener, TcpStream},
+    thread,
     time::{Duration, Instant},
 };
 
@@ -11,6 +13,11 @@ use motor_control::{MotorControlRequest, MotorControlResponse};
 use crate::lidar::LidarResponse;
 
 fn main() {
+    let listener = TcpListener::bind("0.0.0.0:49925").unwrap();
+    listener
+        .set_nonblocking(true)
+        .expect("Cannot set non-blocking");
+
     let mut arduino_port = serialport::new("/dev/ttyACM0", 115200)
         .timeout(Duration::from_micros(1000))
         .open()
@@ -55,23 +62,48 @@ fn main() {
     // }
 
     let mut time = Instant::now();
+
+    start_scan(&mut lidar_port);
+
     loop {
-        let request = LidarRequest::GetDeviceInfo;
-        request.write(&mut lidar_port).unwrap();
-        loop {
-            if lidar_port.bytes_to_read().unwrap() >= 27 {
-                let response = LidarResponse::read(&mut lidar_port).unwrap();
-                println!(
-                    "Lidar device info {:?} received in {:?}",
-                    response,
-                    time.elapsed()
-                );
-                time = Instant::now();
-                break;
-            }
-            thread::sleep(Duration::from_millis(10));
+        if lidar_port.bytes_to_read().unwrap() >= 132 {
+            let mut buf = [0; 132];
+            lidar_port.read_exact(&mut buf).unwrap();
+            println!("read 132 bytes in {:?}", time.elapsed());
+            time = Instant::now();
+        }
+        if let Ok((stream, _)) = listener.accept() {
+            thread::spawn(|| {
+                handle_client(stream);
+            });
         }
     }
+}
+
+fn handle_client(mut stream: TcpStream) {
+    println!("Client connected: {:?}", stream.peer_addr().unwrap());
+    loop {
+        match echo_byte(&mut stream) {
+            Ok(_) => {}
+            Err(e) => match e.kind() {
+                std::io::ErrorKind::UnexpectedEof | std::io::ErrorKind::ConnectionAborted => {
+                    println!("Client disconnected: {:?}", stream.peer_addr().unwrap());
+                    return;
+                }
+                _ => {
+                    eprintln!("Error: {:?}", e);
+                    return;
+                }
+            },
+        }
+    }
+}
+
+fn echo_byte(stream: &mut TcpStream) -> Result<(), std::io::Error> {
+    let mut byte = [0];
+    stream.read_exact(&mut byte)?;
+    stream.write(&byte)?;
+    Ok(())
 }
 
 fn set_position_and_wait(port: &mut Box<dyn serialport::SerialPort>, position: i32) {
@@ -103,4 +135,31 @@ fn set_servo_position_and_wait(port: &mut Box<dyn serialport::SerialPort>, posit
     .write(port)
     .unwrap();
     thread::sleep(Duration::from_millis(1500));
+}
+
+fn start_scan(port: &mut Box<dyn serialport::SerialPort>) {
+    println!("Initializing Lidar");
+    LidarRequest::Stop.write(port).unwrap();
+    // wait
+    std::thread::sleep(Duration::from_millis(800));
+    // clear buffer
+    port.clear(serialport::ClearBuffer::Input).unwrap();
+    port.write(&[0xa5, 0x79]).unwrap();
+    std::thread::sleep(Duration::from_millis(800));
+    let mut buf = [0; 22];
+    port.read_exact(&mut buf).unwrap();
+    assert_eq!(
+        buf,
+        [
+            0xa5, 0x5a, 0x0f, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x61, 0x00, 0x00, 0x00, 0xa0,
+            0x00, 0x00, 0x0c, 0x00, 0x04, 0x00, 0x28, 0x1d
+        ]
+    );
+    port.write(&[0xa5, 0x82, 0x05, 0x03, 0x00, 0x00, 0x00, 0x00, 0x21])
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(800));
+    let mut buf = [0; 7];
+    port.read_exact(&mut buf).unwrap();
+    assert_eq!(buf, [0xa5, 0x5a, 0x84, 0x00, 0x00, 0x40, 0x84]);
+    println!("Lidar started");
 }

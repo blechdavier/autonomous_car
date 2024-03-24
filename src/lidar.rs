@@ -28,8 +28,6 @@
 #define SL_LIDAR_CMD_GET_ACC_BOARD_FLAG     0xFF
  */
 
-use std::default;
-
 pub enum LidarRequest {
     Stop,
     Reset,
