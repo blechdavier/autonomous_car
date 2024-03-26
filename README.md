@@ -1,5 +1,17 @@
 # autonomous_car
 
+## Roadmap
+
+- [ ] Client and server in same binary
+- [ ] Add poses and constraints to pose graph
+  - Maybe do this when a lidar scan is received and when a path ends
+  - Odometry constraints
+  - Scan matching constraints
+- [ ] Optimize pose graph
+- [ ] Generate map
+- [ ] Path planning
+- [ ] Path execution (realtime correction)
+
 ## What
 
 1:10 scale autonomous car powered by Raspberry Pi 5, Arduino Nano Every, Rplidar A1M8, and too many wires.
