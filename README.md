@@ -2,7 +2,7 @@
 
 ## Roadmap
 
-- [ ] Client and server in same binary
+- [ ] Client and server in same ~~binary~~ cargo project
 - [ ] Add poses and constraints to pose graph
   - Maybe do this when a lidar scan is received and when a path ends
   - Odometry constraints
