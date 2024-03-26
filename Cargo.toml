@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 icp_2d = "0.1.2"
 serialport = "4.3.0"
+sysinfo = "0.30.7"
