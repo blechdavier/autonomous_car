@@ -1,6 +1,8 @@
+use tokio::io::AsyncWriteExt;
+use tokio_serial::SerialStream;
+
 #[derive(Debug)]
 pub enum MotorControlRequest {
-    GetMotorPosition,
     SetMotorPosition {
         clicks: i32,
     },
@@ -8,43 +10,25 @@ pub enum MotorControlRequest {
     SetServoPosition {
         microseconds: u16,
     },
-}
-
-#[derive(Debug)]
-pub enum MotorControlResponse {
-    MotorPosition { clicks: i32 },
-}
-
-impl MotorControlResponse {
-    pub fn read(
-        port: &mut Box<dyn serialport::SerialPort>,
-    ) -> Result<MotorControlResponse, serialport::Error> {
-        let mut buffer = [0; 4];
-        port.read_exact(&mut buffer)?;
-        dbg!(buffer);
-        Ok(MotorControlResponse::MotorPosition {
-            clicks: i32::from_le_bytes(buffer),
-        })
-    }
+    /// Values between -255 and 255 are allowed. Negative values are reverse, positive values are forward.
+    SetMotorOutput(i16),
 }
 
 impl MotorControlRequest {
-    pub fn write(
-        &self,
-        port: &mut Box<dyn serialport::SerialPort>,
-    ) -> Result<(), serialport::Error> {
+    pub async fn write(&self, port: &mut SerialStream) -> Result<(), tokio_serial::Error> {
         match self {
-            MotorControlRequest::GetMotorPosition => {
-                port.write(&[0x00])?;
-            }
             MotorControlRequest::SetMotorPosition { clicks } => {
-                port.write(&[0x01])?;
+                port.write(&[0x01]).await?;
                 let bytes = clicks.to_le_bytes();
-                port.write(&bytes)?;
+                port.write(&bytes).await?;
             }
             MotorControlRequest::SetServoPosition { microseconds } => {
-                port.write(&[0x02])?;
-                port.write(&microseconds.to_le_bytes())?;
+                port.write(&[0x02]).await?;
+                port.write(&microseconds.to_le_bytes()).await?;
+            }
+            MotorControlRequest::SetMotorOutput(output) => {
+                port.write(&[0x03]).await?;
+                port.write(&output.to_le_bytes()).await?;
             }
         }
         Ok(())

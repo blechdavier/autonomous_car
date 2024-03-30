@@ -30,38 +30,44 @@
 
 use std::time::{Duration, Instant};
 
+use tokio_serial::SerialPort;
+use tokio_serial::SerialStream;
+
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
 pub struct LidarEngine {
-    pub port: Box<dyn serialport::SerialPort>,
+    pub port: SerialStream,
     pub scan_packets: Vec<ScanPacket>,
     pub scans: Vec<LidarScan>,
 }
 
 impl LidarEngine {
-    pub fn new(port: Box<dyn serialport::SerialPort>) -> Self {
+    pub async fn new(port: SerialStream) -> Self {
         let mut engine = Self {
             port,
             scan_packets: Vec::new(),
             scans: Vec::new(),
         };
-        engine.init();
+        engine.init().await;
         engine
     }
 
-    fn init(&mut self) {
+    async fn init(&mut self) {
         println!("Initializing Lidar");
         let tries = 5; // TODO constant
         for i in 0..tries {
-            LidarRequest::Stop.write(&mut self.port).unwrap();
+            LidarRequest::Stop.write(&mut self.port).await.unwrap();
             // wait
             std::thread::sleep(Duration::from_millis(800));
             // clear buffer
-            self.port.clear(serialport::ClearBuffer::Input).unwrap();
+            self.port.clear(tokio_serial::ClearBuffer::Input).unwrap();
             self.port
                 .write(&[0xa5, 0x82, 0x05, 0x03, 0x00, 0x00, 0x00, 0x00, 0x21])
+                .await
                 .unwrap();
             std::thread::sleep(Duration::from_millis(800));
             let mut buf = [0; 7];
-            self.port.read_exact(&mut buf).unwrap();
+            self.port.read_exact(&mut buf).await.unwrap();
             if buf == [0xa5, 0x5a, 0x84, 0x00, 0x00, 0x40, 0x84] {
                 println!("Lidar initialized");
                 break;
@@ -75,11 +81,11 @@ impl LidarEngine {
     }
 
     /// See if there are new scan packets and process them accordingly in order to optionally get a new scan
-    pub fn poll(&mut self) -> Option<&LidarScan> {
+    pub async fn poll(&mut self) -> Option<&LidarScan> {
         if self.port.bytes_to_read().unwrap() >= 132 {
             let scan_count = self.scans.len();
             let mut buffer = [0; 132];
-            self.port.read_exact(&mut buffer).unwrap();
+            self.port.read_exact(&mut buffer).await;
             self.scan_packets.push(ScanPacket::from_buffer(&buffer));
             if self.scan_packets.len() > 1 {
                 for i in 0..32 {
@@ -188,7 +194,7 @@ impl LidarEngine {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct LidarPoint {
     pub angle_q6: u16,
     pub distance_q0: u32,
@@ -250,7 +256,7 @@ impl ScanPacket {
 
 const DEFAULT_SCAN: LidarScan = LidarScan { points: Vec::new() };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LidarScan {
     pub points: Vec<LidarPoint>,
 }
@@ -275,22 +281,19 @@ pub enum LidarResponse {
 }
 
 impl LidarRequest {
-    pub fn write(
-        &self,
-        port: &mut Box<dyn serialport::SerialPort>,
-    ) -> Result<(), serialport::Error> {
+    pub async fn write(&self, port: &mut SerialStream) -> Result<(), tokio_serial::Error> {
         match self {
             LidarRequest::Stop => {
-                port.write(&[0xa5, 0x25])?;
+                port.write(&[0xa5, 0x25]).await?;
             }
             LidarRequest::Reset => {
-                port.write(&[0xa5, 0x40])?;
+                port.write(&[0xa5, 0x40]).await?;
             }
             LidarRequest::GetDeviceInfo => {
-                port.write(&[0xa5, 0x50])?;
+                port.write(&[0xa5, 0x50]).await?;
             }
             LidarRequest::GetDeviceHealth => {
-                port.write(&[0xa5, 0x52])?;
+                port.write(&[0xa5, 0x52]).await?;
             }
         }
         Ok(())
@@ -299,9 +302,9 @@ impl LidarRequest {
 
 impl LidarResponse {
     /// doesn't work yet. this might not be necessary
-    pub fn read(port: &mut Box<dyn serialport::SerialPort>) -> Result<Self, serialport::Error> {
+    pub async fn read(port: &mut SerialStream) -> Result<Self, tokio_serial::Error> {
         let mut response_descriptor = [0; 7];
-        port.read_exact(&mut response_descriptor)?;
+        port.read_exact(&mut response_descriptor).await?;
         assert!(response_descriptor[0] == 0xa5);
         assert!(response_descriptor[1] == 0x5a);
         // 30bit length
@@ -312,7 +315,7 @@ impl LidarResponse {
         let send_mode = response_descriptor[5] & 0b11;
         let length = ((response_descriptor[5] as u32) << 8) | response_descriptor[4] as u32;
         let mut buffer = [0; 20];
-        port.read_exact(&mut buffer)?;
+        port.read_exact(&mut buffer).await?;
         Ok(LidarResponse::DeviceInfo {
             model: buffer[0],
             firmware_minor: buffer[1],
