@@ -33,6 +33,7 @@ use std::time::{Duration, Instant};
 use tokio_serial::SerialPort;
 use tokio_serial::SerialStream;
 
+use nalgebra::Vector2;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 pub struct LidarEngine {
@@ -208,6 +209,16 @@ impl LidarPoint {
     pub fn get_angle_rad(&self) -> f32 {
         self.angle_q6 as f32 * std::f32::consts::PI / 180.0 / 64.0
     }
+    pub fn get_angle_rad_f64(&self) -> f64 {
+        self.angle_q6 as f64 * std::f64::consts::PI / 180.0 / 64.0
+    }
+    pub fn to_cartesian(&self) -> Vector2<f64> {
+        let angle = self.get_angle_rad_f64();
+        Vector2::new(
+            self.distance_q0 as f64 * angle.cos(),
+            self.distance_q0 as f64 * angle.sin(),
+        )
+    }
 }
 
 pub struct ScanPacket {
@@ -259,6 +270,15 @@ const DEFAULT_SCAN: LidarScan = LidarScan { points: Vec::new() };
 #[derive(Debug, Clone)]
 pub struct LidarScan {
     pub points: Vec<LidarPoint>,
+}
+
+impl LidarScan {
+    pub fn to_cartesian_points(&self) -> Vec<Vector2<f64>> {
+        self.points
+            .iter()
+            .map(|point| point.to_cartesian())
+            .collect()
+    }
 }
 
 // communications
