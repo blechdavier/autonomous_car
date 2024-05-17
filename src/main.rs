@@ -5,22 +5,21 @@ mod pose_graph;
 mod tcp_server;
 mod utils;
 
-use std::{
-    fs,
-    net::TcpListener,
-    sync::{Arc, Mutex},
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
-};
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
 
-use lidar::{LidarEngine, LidarScan};
+use lidar::LidarEngine;
 use motor_control::MotorControlRequest;
 use pose_graph::PoseGraph;
-use tcp_server::{poll_client, Client};
+use tcp_server::Client;
 use tokio::sync::mpsc;
 use utils::init_serialport;
 
 use tokio::io::AsyncReadExt;
+use tokio::net::{TcpListener, TcpStream};
 use tokio_serial::SerialPort;
+
+use crate::tcp_server::{CarToClient, ClientToCar};
 
 #[tokio::main]
 async fn main() {
@@ -28,7 +27,9 @@ async fn main() {
     let pose_graph: Arc<Mutex<PoseGraph>> = Arc::new(Mutex::new(PoseGraph::new()));
     let motor_position = Arc::new(Mutex::new(0));
     let servo_us = Arc::new(Mutex::new(1500u16));
+    let mut arduino_up = false; // if it is not up, do not send messages to it yet
     let (tx, mut rx) = mpsc::channel::<MotorControlRequest>(32);
+    let tx = Arc::new(tx);
 
     let pose_graph_lidar_thread = pose_graph.clone();
 
@@ -45,11 +46,15 @@ async fn main() {
         }
     });
 
+    let tcp_server_tx = tx.clone();
+    let tcp_server_pose_graph = pose_graph.clone();
     // spawn the tcp listener on another thread
     tokio::spawn(async move {
-        let listener = TcpListener::bind("0.0.0.0:49925").unwrap();
+        let listener = TcpListener::bind("0.0.0.0:49925").await.unwrap();
         loop {
-            let (stream, _) = listener.accept().unwrap();
+            let (stream, addr) = listener.accept().await.unwrap();
+            let client_tx = tcp_server_tx.clone();
+            let pose_graph_client_thread = tcp_server_pose_graph.clone();
 
             // give each client its own green thread
             tokio::spawn(async move {
@@ -57,6 +62,45 @@ async fn main() {
 
                 loop {
                     // handle client loop
+                    if let Ok(packets) = client.poll().await {
+                        println!("read {} packets", packets.len());
+                        for packet in packets {
+                            println!("received packet {:?}", packet);
+                            match packet {
+                                ClientToCar::GetCurrentPose => {
+                                    // cry about it
+                                }
+                                ClientToCar::GetMostRecentLidarScan => {
+                                    let scan = {
+                                        let graph = pose_graph_client_thread.lock().unwrap();
+                                        if let Some(node) = graph.nodes.last() {
+                                            Some(node.scan.clone())
+                                        } else {
+                                            None
+                                        }
+                                    };
+                                    if let Some(scan) = scan {
+                                        CarToClient::LidarScan { scan: &scan }
+                                            .write(&mut client.stream)
+                                            .await
+                                            .unwrap();
+                                    }
+                                }
+                                ClientToCar::SetServoPosition { microseconds } => {
+                                    client_tx
+                                        .try_send(MotorControlRequest::SetServoPosition {
+                                            microseconds,
+                                        })
+                                        .unwrap();
+                                }
+                                ClientToCar::SetMotorOutput(output) => {
+                                    client_tx
+                                        .try_send(MotorControlRequest::SetMotorOutput(output))
+                                        .unwrap();
+                                }
+                            }
+                        }
+                    }
                 }
             });
         }
@@ -64,27 +108,29 @@ async fn main() {
 
     // spawn the motor control thread
     let thread_motor_position = motor_position.clone();
-    let thread_servo_us = Arc::new(Mutex::new(1500u16));
+    let thread_servo_us = servo_us.clone();
     tokio::spawn(async move {
         let mut arduino_port = init_serialport("/dev/ttyACM0");
 
         loop {
-            if let Ok(request) = rx.try_recv() {
-                println!("sending request: {:?}", request);
-                if let MotorControlRequest::SetServoPosition { microseconds } = request {
-                    *thread_servo_us.lock().unwrap() = microseconds;
+            if arduino_up {
+                if let Ok(request) = rx.try_recv() {
+                    println!("sending request: {:?}", request);
+                    if let MotorControlRequest::SetServoPosition { microseconds } = request {
+                        *thread_servo_us.lock().unwrap() = microseconds;
+                    }
+                    request.write(&mut arduino_port).await.unwrap();
                 }
-                request.write(&mut arduino_port).await.unwrap();
             }
             // 5 byte packet sent over and over again: 0b10101010, i32::to_le_bytes()
             if arduino_port.bytes_to_read().unwrap() >= 5 {
+                arduino_up = true;
                 let mut buffer = [0; 5];
                 arduino_port.read_exact(&mut buffer).await.unwrap();
                 // the first byte of the packet, think of it as a flag
                 if buffer[0] == 0b10101010 {
                     // this could *technically* return an invalid motor position if the alignment of the packet is off. This could only reasonably happen if the arduino somehow starts at a position where the first byte is 0b10101010, which is not a normal starting configuration
                     let position = i32::from_le_bytes([buffer[1], buffer[2], buffer[3], buffer[4]]);
-                    dbg!(position);
                     *thread_motor_position.lock().unwrap() = position;
                 } else {
                     // alignment is off of the 5 byte packet
@@ -94,19 +140,9 @@ async fn main() {
         }
     });
 
-    tx.send(MotorControlRequest::SetMotorOutput(255))
+    tx.send(MotorControlRequest::SetServoPosition { microseconds: 1450 })
         .await
         .unwrap();
 
-    loop {
-        // handle motor control
-        {
-            let clicks = motor_position.lock().unwrap().clone();
-            let servo_angle = servo_us.lock().unwrap().clone();
-        }
-
-        {
-            // println!("there are {} scans", lidar_scans.lock().unwrap().len());
-        }
-    }
+    loop {}
 }

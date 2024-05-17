@@ -13,6 +13,6 @@ pub fn init_serialport(port: &str) -> SerialStream {
             for p in ports {
                 println!("{}", p.port_name);
             }
-            std::process::exit(1);
+            panic!();
         })
 }

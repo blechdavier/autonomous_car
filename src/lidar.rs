@@ -86,7 +86,7 @@ impl LidarEngine {
         if self.port.bytes_to_read().unwrap() >= 132 {
             let scan_count = self.scans.len();
             let mut buffer = [0; 132];
-            self.port.read_exact(&mut buffer).await;
+            self.port.read_exact(&mut buffer).await.unwrap();
             self.scan_packets.push(ScanPacket::from_buffer(&buffer));
             if self.scan_packets.len() > 1 {
                 for i in 0..32 {
