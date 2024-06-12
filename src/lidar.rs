@@ -279,6 +279,18 @@ impl LidarScan {
             .map(|point| point.to_cartesian())
             .collect()
     }
+    pub fn raycasts(&self) -> [u32; 8] {
+        let mut lengths = [u32::MAX; 8];
+        let offset = 360.0 / 8 as f32 / 2.0;
+        for point in &self.points {
+            // offset by half a segment and wrap
+            let angle = (point.get_angle_degrees() + offset).rem_euclid(360.0);
+            let dist = point.distance_q0;
+            let segment = (angle / 360.0 * 8 as f32).floor() as usize;
+            lengths[segment] = lengths[segment].min(dist);
+        }
+        lengths
+    }
 }
 
 // communications
@@ -336,16 +348,14 @@ impl LidarResponse {
         let length = ((response_descriptor[5] as u32) << 8) | response_descriptor[4] as u32;
         let mut buffer = [0; 20];
         port.read_exact(&mut buffer).await?;
+        let mut serial = [0; 16];
+        serial.copy_from_slice(&buffer[4..20]);
         Ok(LidarResponse::DeviceInfo {
             model: buffer[0],
             firmware_minor: buffer[1],
             firmware_major: buffer[2],
             hardware: buffer[3],
-            serial: [
-                buffer[4], buffer[5], buffer[6], buffer[7], buffer[8], buffer[9], buffer[10],
-                buffer[11], buffer[12], buffer[13], buffer[14], buffer[15], buffer[16], buffer[17],
-                buffer[18], buffer[19],
-            ], // TODO this is embarassing lol
+            serial,
         })
     }
 }

@@ -26,7 +26,7 @@ async fn main() {
     // state
     let pose_graph: Arc<Mutex<PoseGraph>> = Arc::new(Mutex::new(PoseGraph::new()));
     let motor_position = Arc::new(Mutex::new(0));
-    let servo_us = Arc::new(Mutex::new(1500u16));
+    let servo_us = Arc::new(Mutex::new(1450));
     let mut arduino_up = false; // if it is not up, do not send messages to it yet
     let (tx, mut rx) = mpsc::channel::<MotorControlRequest>(32);
     let tx = Arc::new(tx);
@@ -53,6 +53,7 @@ async fn main() {
         let listener = TcpListener::bind("0.0.0.0:49925").await.unwrap();
         loop {
             let (stream, addr) = listener.accept().await.unwrap();
+            println!("accepting connection from {}", addr);
             let client_tx = tcp_server_tx.clone();
             let pose_graph_client_thread = tcp_server_pose_graph.clone();
 
@@ -144,5 +145,44 @@ async fn main() {
         .await
         .unwrap();
 
-    loop {}
+    loop {
+        // fixme this is not efficient
+        // if let Some(node) = pose_graph.lock().unwrap().nodes.last() {
+        //     let scan = &node.scan;
+        //     let raycasts = scan.raycasts();
+        //     let left_right = (raycasts[6] as i32 - raycasts[2] as i32) / 2;
+        //     // let front_dist = raycasts[3].min(raycasts[4]).min(raycasts[5]);
+        //     // let back_dist = raycasts[7].min(raycasts[0]).min(raycasts[1]);
+        //     let front_dist = raycasts[4];
+        //     let back_dist = raycasts[0];
+        //     dbg!(front_dist, back_dist);
+        //     if direction == Direction::Forward {
+        //         if front_dist < 1500 {
+        //             direction = Direction::Backward;
+        //             tx.send(MotorControlRequest::SetMotorOutput(-220))
+        //                 .await
+        //                 .unwrap();
+        //         }
+        //     } else {
+        //         if back_dist < 750 {
+        //             direction = Direction::Forward;
+        //             tx.send(MotorControlRequest::SetMotorOutput(220))
+        //                 .await
+        //                 .unwrap();
+        //         }
+        //     }
+
+        //     let steering;
+        //     if direction == Direction::Forward {
+        //         steering = (left_right.max(-350).min(350) + 1450) as u16;
+        //     } else {
+        //         steering = (-left_right.max(-350).min(350) + 1450) as u16;
+        //     }
+        //     tx.send(MotorControlRequest::SetServoPosition {
+        //         microseconds: steering,
+        //     })
+        //     .await
+        //     .unwrap();
+        // }
+    }
 }
